@@ -36,12 +36,13 @@ module.exports = async (req, res) => {
     if (!isUuid(weddingId)) {
       return res.status(400).json({
         ok: false,
-        error:
-          "Missing/invalid wedding_id UUID. Submit the form using a URL like ?wedding_id=<uuid>.",
-        received: weddingId ?? null,
+        error: "Missing/invalid wedding_id UUID in webhook payload.",
+        received_wedding_id: weddingId ?? null,
+        body_keys: Object.keys(body || {}),
+        // show a small preview so we can see where Tally put things (safe + short)
+        body_preview: JSON.stringify(body || {}).slice(0, 800),
       });
     }
-
     const supabase = createClient(
       process.env.SUPABASE_URL,
       process.env.SUPABASE_SERVICE_ROLE_KEY
