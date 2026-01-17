@@ -7,22 +7,22 @@ function isUuid(v) {
   );
 }
 
-function extractWeddingId(body) {
-  const direct =
-    body?.wedding_id ||
-    body?.hidden?.wedding_id ||
-    body?.data?.wedding_id ||
-    body?.fields?.wedding_id;
-
-  if (direct) return direct;
-
+function extractFieldValueByLabel(body, label) {
   const fields = body?.data?.fields;
-  if (Array.isArray(fields)) {
-    const match = fields.find((f) => f?.label === "wedding_id");
-    if (match?.value) return match.value;
-  }
+  if (!Array.isArray(fields)) return null;
+  const match = fields.find((f) => f?.label === label);
+  return match?.value ?? null;
+}
 
-  return null;
+function extractPublicCode(body) {
+  // Try common places (harmless to keep), then Tally fields array
+  return (
+    body?.w ||
+    body?.data?.w ||
+    body?.fields?.w ||
+    extractFieldValueByLabel(body, "w") ||
+    null
+  );
 }
 
 function extractProviderSubmissionId(body) {
@@ -34,15 +34,13 @@ module.exports = async (req, res) => {
     if (req.method !== "POST") return res.status(200).send("OK");
 
     const body = req.body || {};
-    const weddingId = extractWeddingId(body);
+    const publicCode = extractPublicCode(body);
 
-    if (!isUuid(weddingId)) {
+    if (typeof publicCode !== "string" || publicCode.trim().length === 0) {
       return res.status(400).json({
         ok: false,
-        error: "Missing/invalid wedding_id UUID in webhook payload.",
-        received_wedding_id: weddingId ?? null,
-        body_keys: Object.keys(body || {}),
-        body_preview: JSON.stringify(body || {}).slice(0, 800),
+        error: "Missing public wedding code. Expect a hidden field labeled 'w' (e.g. TT01).",
+        received_w: publicCode ?? null,
       });
     }
 
@@ -51,20 +49,41 @@ module.exports = async (req, res) => {
       process.env.SUPABASE_SERVICE_ROLE_KEY
     );
 
+    // Lookup UUID from weddings.public_code
+    const { data: weddingRow, error: lookupError } = await supabase
+      .from("weddings")
+      .select("id")
+      .eq("public_code", publicCode)
+      .maybeSingle();
+
+    if (lookupError) {
+      return res.status(500).json({ ok: false, error: lookupError.message });
+    }
+
+    const weddingId = weddingRow?.id ?? null;
+
+    if (!isUuid(weddingId)) {
+      return res.status(400).json({
+        ok: false,
+        error: "Unknown public wedding code (no matching wedding found).",
+        received_w: publicCode,
+      });
+    }
+
     const providerSubmissionId = extractProviderSubmissionId(body);
 
-    const { error } = await supabase.from("submissions_raw").insert({
+    const { error: insertError } = await supabase.from("submissions_raw").insert({
       wedding_id: weddingId,
       provider: "tally",
       provider_submission_id: providerSubmissionId,
       payload: body,
     });
 
-    if (error) {
-      const msg = String(error.message || "").toLowerCase();
+    if (insertError) {
+      const msg = String(insertError.message || "").toLowerCase();
       const isDuplicate = msg.includes("duplicate") || msg.includes("unique");
       if (!isDuplicate) {
-        return res.status(500).json({ ok: false, error: error.message });
+        return res.status(500).json({ ok: false, error: insertError.message });
       }
     }
 
