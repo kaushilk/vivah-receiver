@@ -52,7 +52,7 @@ module.exports = async (req, res) => {
     // Lookup UUID from weddings.public_code
     const { data: weddingRow, error: lookupError } = await supabase
       .from("weddings")
-      .select("id")
+      .select("wedding_id")
       .eq("public_code", publicCode)
       .maybeSingle();
 
@@ -60,7 +60,7 @@ module.exports = async (req, res) => {
       return res.status(500).json({ ok: false, error: lookupError.message });
     }
 
-    const weddingId = weddingRow?.id ?? null;
+    const weddingId = weddingRow?.wedding_id ?? null;
 
     if (!isUuid(weddingId)) {
       return res.status(400).json({
