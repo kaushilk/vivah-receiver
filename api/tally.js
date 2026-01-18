@@ -15,7 +15,6 @@ function extractFieldValueByLabel(body, label) {
 }
 
 function extractPublicCode(body) {
-  // Try common places (harmless to keep), then Tally fields array
   return (
     body?.w ||
     body?.data?.w ||
@@ -23,6 +22,10 @@ function extractPublicCode(body) {
     extractFieldValueByLabel(body, "w") ||
     null
   );
+}
+
+function extractFormType(body) {
+  return extractFieldValueByLabel(body, "form_type");
 }
 
 function extractProviderSubmissionId(body) {
@@ -35,6 +38,7 @@ module.exports = async (req, res) => {
 
     const body = req.body || {};
     const publicCode = extractPublicCode(body);
+    const formType = extractFormType(body);
 
     if (typeof publicCode !== "string" || publicCode.trim().length === 0) {
       return res.status(400).json({
@@ -49,7 +53,6 @@ module.exports = async (req, res) => {
       process.env.SUPABASE_SERVICE_ROLE_KEY
     );
 
-    // Lookup UUID from weddings.public_code
     const { data: weddingRow, error: lookupError } = await supabase
       .from("weddings")
       .select("wedding_id")
@@ -85,6 +88,10 @@ module.exports = async (req, res) => {
       if (!isDuplicate) {
         return res.status(500).json({ ok: false, error: insertError.message });
       }
+    }
+
+    if (formType === "contact_sheet") {
+      console.log("Routing: contact_sheet processor");
     }
 
     return res.status(200).json({ ok: true });
