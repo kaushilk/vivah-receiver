@@ -32,6 +32,10 @@ function extractFormType(body) {
   return extractFieldValueByLabel(body, "form_type");
 }
 
+function extractHouseId(body) {
+  return extractFieldValueByLabel(body, "house_id");
+}
+
 function extractProviderSubmissionId(body) {
   return body?.data?.submissionId || body?.data?.responseId || body?.eventId || null;
 }
@@ -54,6 +58,29 @@ function extractContactSheetFields(body) {
     state: extractFieldValueByLabel(body, "state"),
     postal_code: extractFieldValueByLabel(body, "postal_code"),
     country: extractFieldValueByLabel(body, "country"),
+  };
+}
+
+function extractRsvpFields(body) {
+  const rsvpStatus = extractFieldValueByLabel(body, "rsvp_status");
+  const eventsAttending = extractFieldValueByLabel(body, "events_attending");
+  const dietaryNotes = extractFieldValueByLabel(body, "dietary_notes");
+  const questions = extractFieldValueByLabel(body, "questions");
+  const partySize = extractFieldValueByLabel(body, "party_size");
+
+  return {
+    rsvp_status: rsvpStatus,
+    events_attending: Array.isArray(eventsAttending)
+      ? eventsAttending.filter((v) => typeof v === "string" && v.trim().length > 0)
+      : null,
+    dietary_notes: typeof dietaryNotes === "string" ? dietaryNotes : null,
+    questions: typeof questions === "string" ? questions : null,
+    party_size:
+      typeof partySize === "number"
+        ? partySize
+        : typeof partySize === "string" && partySize.trim() !== ""
+          ? Number(partySize)
+          : null,
   };
 }
 
@@ -83,7 +110,6 @@ async function upsertHouseholdFromContactSheet({ supabase, weddingId, rawSubmiss
   const phoneNormalized = normalizePhone(extracted.phone_raw);
   const emailNormalized = normalizeEmail(extracted.email_raw);
 
-  // For household dedupe + future comms, at least one contact channel is required.
   if (!phoneNormalized && !emailNormalized) {
     return {
       ok: false,
@@ -109,10 +135,6 @@ async function upsertHouseholdFromContactSheet({ supabase, weddingId, rawSubmiss
     updated_at: new Date().toISOString(),
   };
 
-  // Merge strategy to avoid creating a second household if someone submits with email first, then phone later:
-  // 1) Try find existing by phone
-  // 2) Else try find existing by email
-  // 3) Else insert new
   let existing = null;
 
   if (phoneNormalized) {
@@ -150,6 +172,84 @@ async function upsertHouseholdFromContactSheet({ supabase, weddingId, rawSubmiss
   return { ok: true, household_id: data.id, action: "inserted" };
 }
 
+async function updateHouseholdFromRsvp({ supabase, weddingId, rawSubmissionId, body }) {
+  const houseId = extractHouseId(body);
+
+  if (!isUuid(houseId)) {
+    return {
+      ok: false,
+      status: 400,
+      error: "Missing or invalid house_id. Expect a UUID in hidden field labeled 'house_id'.",
+      received_house_id: houseId ?? null,
+    };
+  }
+
+  const fields = extractRsvpFields(body);
+
+  const normalizedStatus =
+    typeof fields.rsvp_status === "string" ? fields.rsvp_status.trim().toLowerCase() : null;
+
+  if (normalizedStatus !== "yes" && normalizedStatus !== "no") {
+    return {
+      ok: false,
+      status: 400,
+      error: "Missing or invalid rsvp_status. Expected 'yes' or 'no'.",
+      received_rsvp_status: fields.rsvp_status ?? null,
+    };
+  }
+
+  // Only update optional fields if they were present on the form submission.
+  // This allows different weddings to have different RSVP forms without wiping data.
+  const updatePayload = {
+    rsvp_status: normalizedStatus,
+    last_submission_id: rawSubmissionId,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (fields.party_size !== null && !Number.isNaN(fields.party_size)) {
+    updatePayload.party_size = fields.party_size;
+  }
+
+  if (fields.dietary_notes !== null) {
+    updatePayload.dietary_notes = fields.dietary_notes;
+  }
+
+  if (fields.questions !== null) {
+    updatePayload.questions = fields.questions;
+  }
+
+  if (fields.events_attending !== null) {
+    updatePayload.events_attending = fields.events_attending;
+  }
+
+  // Ensure the household belongs to this wedding (prevents cross-wedding updates)
+  const { data: existing, error: fetchError } = await supabase
+    .from("households")
+    .select("id")
+    .eq("id", houseId)
+    .eq("wedding_id", weddingId)
+    .maybeSingle();
+
+  if (fetchError) return { ok: false, status: 500, error: fetchError.message };
+  if (!existing?.id) {
+    return {
+      ok: false,
+      status: 404,
+      error: "Household not found for this wedding (invalid house_id for this w).",
+      received_house_id: houseId,
+    };
+  }
+
+  const { error: updateError } = await supabase
+    .from("households")
+    .update(updatePayload)
+    .eq("id", houseId);
+
+  if (updateError) return { ok: false, status: 500, error: updateError.message };
+
+  return { ok: true, household_id: houseId, action: "updated_rsvp" };
+}
+
 /* =========================
    ROUTER
    ========================= */
@@ -175,7 +275,6 @@ module.exports = async (req, res) => {
       process.env.SUPABASE_SERVICE_ROLE_KEY
     );
 
-    // Resolve public wedding code -> internal wedding UUID
     const { data: weddingRow, error: lookupError } = await supabase
       .from("weddings")
       .select("wedding_id")
@@ -220,7 +319,6 @@ module.exports = async (req, res) => {
         return res.status(500).json({ ok: false, error: insertError.message });
       }
 
-      // If duplicate, fetch the existing raw row id so downstream tables can reference it
       if (providerSubmissionId) {
         const { data: existingRaw, error: fetchError } = await supabase
           .from("submissions_raw")
@@ -253,6 +351,28 @@ module.exports = async (req, res) => {
       return res.status(200).json({
         ok: true,
         routed: "contact_sheet",
+        household_id: result.household_id,
+        action: result.action,
+      });
+    }
+
+    if (formType === "rsvp") {
+      const result = await updateHouseholdFromRsvp({
+        supabase,
+        weddingId,
+        rawSubmissionId,
+        body,
+      });
+
+      if (!result.ok) {
+        return res
+          .status(result.status || 500)
+          .json({ ok: false, error: result.error, ...result });
+      }
+
+      return res.status(200).json({
+        ok: true,
+        routed: "rsvp",
         household_id: result.household_id,
         action: result.action,
       });
