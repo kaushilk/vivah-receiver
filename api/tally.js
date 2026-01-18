@@ -11,40 +11,66 @@ function isUuid(v) {
    EXTRACTORS
    ========================= */
 
-function extractFieldValueByLabel(body, label) {
+function getFieldsArray(body) {
   const fields = body?.data?.fields;
-  if (!Array.isArray(fields)) return null;
-  const match = fields.find((f) => f?.label === label);
-  return match?.value ?? null;
+  return Array.isArray(fields) ? fields : [];
+}
+
+function findFieldByLabel(body, label) {
+  const fields = getFieldsArray(body);
+  return fields.find((f) => f?.label === label) || null;
 }
 
 function extractPublicCode(body) {
-  return (
-    body?.w ||
-    body?.data?.w ||
-    body?.fields?.w ||
-    extractFieldValueByLabel(body, "w") ||
-    null
-  );
+  // Hidden field labeled "w"
+  const hidden = findFieldByLabel(body, "w");
+  return hidden?.value ?? null;
 }
 
 function extractFormType(body) {
-  return extractFieldValueByLabel(body, "form_type");
+  const f = findFieldByLabel(body, "form_type");
+  return f?.value ?? null;
 }
 
 function extractHouseId(body) {
-  return extractFieldValueByLabel(body, "house_id");
+  const f = findFieldByLabel(body, "house_id");
+  return f?.value ?? null;
 }
 
 function extractProviderSubmissionId(body) {
   return body?.data?.submissionId || body?.data?.responseId || body?.eventId || null;
 }
 
+// Converts dropdown/checkbox option IDs -> option text when Tally provides options[]
+function resolveOptionTexts(field) {
+  if (!field) return null;
+
+  const value = field.value;
+
+  // If it's already a string/number/bool, return as-is
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+
+  // If it's an array (dropdown multi / checkboxes), map ids -> option text when possible
+  if (Array.isArray(value)) {
+    const options = Array.isArray(field.options) ? field.options : [];
+    const idToText = new Map(options.map((o) => [o?.id, o?.text]));
+
+    // If items look like ids and we can map, return text; otherwise return original items
+    return value
+      .map((v) => (idToText.has(v) ? idToText.get(v) : v))
+      .filter((v) => v !== null && v !== undefined);
+  }
+
+  return null;
+}
+
 function extractContactSheetFields(body) {
-  const firstName = extractFieldValueByLabel(body, "first_name");
-  const lastName = extractFieldValueByLabel(body, "last_name");
-  const phoneRaw = extractFieldValueByLabel(body, "phone_number");
-  const emailRaw = extractFieldValueByLabel(body, "email");
+  const firstName = findFieldByLabel(body, "first_name")?.value ?? null;
+  const lastName = findFieldByLabel(body, "last_name")?.value ?? null;
+  const phoneRaw = findFieldByLabel(body, "phone_number")?.value ?? null;
+  const emailRaw = findFieldByLabel(body, "email")?.value ?? null;
 
   const primaryName = [firstName, lastName].filter(Boolean).join(" ").trim() || null;
 
@@ -52,34 +78,42 @@ function extractContactSheetFields(body) {
     primary_name: primaryName,
     phone_raw: phoneRaw,
     email_raw: emailRaw,
-    address_line_1: extractFieldValueByLabel(body, "address_line_1"),
-    address_line_2: extractFieldValueByLabel(body, "address_line_2"),
-    city: extractFieldValueByLabel(body, "city"),
-    state: extractFieldValueByLabel(body, "state"),
-    postal_code: extractFieldValueByLabel(body, "postal_code"),
-    country: extractFieldValueByLabel(body, "country"),
+    address_line_1: findFieldByLabel(body, "address_line_1")?.value ?? null,
+    address_line_2: findFieldByLabel(body, "address_line_2")?.value ?? null,
+    city: findFieldByLabel(body, "city")?.value ?? null,
+    state: findFieldByLabel(body, "state")?.value ?? null,
+    postal_code: findFieldByLabel(body, "postal_code")?.value ?? null,
+    country: findFieldByLabel(body, "country")?.value ?? null,
   };
 }
 
 function extractRsvpFields(body) {
-  const rsvpStatus = extractFieldValueByLabel(body, "rsvp_status");
-  const eventsAttending = extractFieldValueByLabel(body, "events_attending");
-  const dietaryNotes = extractFieldValueByLabel(body, "dietary_notes");
-  const questions = extractFieldValueByLabel(body, "questions");
-  const partySize = extractFieldValueByLabel(body, "party_size");
+  const rsvpField = findFieldByLabel(body, "rsvp_status");
+  const eventsField = findFieldByLabel(body, "events_attending");
+  const dietaryField = findFieldByLabel(body, "dietary_notes");
+  const questionsField = findFieldByLabel(body, "questions");
+  const partySizeField = findFieldByLabel(body, "party_size");
+
+  const rsvpResolved = resolveOptionTexts(rsvpField);
+  const eventsResolved = resolveOptionTexts(eventsField);
+
+  const rsvpText =
+    Array.isArray(rsvpResolved) ? rsvpResolved[0] : rsvpResolved; // dropdown sometimes array
 
   return {
-    rsvp_status: rsvpStatus,
-    events_attending: Array.isArray(eventsAttending)
-      ? eventsAttending.filter((v) => typeof v === "string" && v.trim().length > 0)
+    rsvp_status: typeof rsvpText === "string" ? rsvpText : null,
+    events_attending: Array.isArray(eventsResolved)
+      ? eventsResolved.filter((v) => typeof v === "string" && v.trim().length > 0)
       : null,
-    dietary_notes: typeof dietaryNotes === "string" ? dietaryNotes : null,
-    questions: typeof questions === "string" ? questions : null,
+    dietary_notes:
+      typeof dietaryField?.value === "string" ? dietaryField.value : dietaryField?.value ?? null,
+    questions:
+      typeof questionsField?.value === "string" ? questionsField.value : questionsField?.value ?? null,
     party_size:
-      typeof partySize === "number"
-        ? partySize
-        : typeof partySize === "string" && partySize.trim() !== ""
-          ? Number(partySize)
+      typeof partySizeField?.value === "number"
+        ? partySizeField.value
+        : typeof partySizeField?.value === "string" && partySizeField.value.trim() !== ""
+          ? Number(partySizeField.value)
           : null,
   };
 }
@@ -98,6 +132,14 @@ function normalizePhone(phone) {
 function normalizeEmail(email) {
   if (!email) return null;
   return String(email).trim().toLowerCase();
+}
+
+function normalizeRsvpStatus(s) {
+  if (!s) return null;
+  const v = String(s).trim().toLowerCase();
+  if (v === "yes" || v === "y") return "yes";
+  if (v === "no" || v === "n") return "no";
+  return null;
 }
 
 /* =========================
@@ -185,23 +227,19 @@ async function updateHouseholdFromRsvp({ supabase, weddingId, rawSubmissionId, b
   }
 
   const fields = extractRsvpFields(body);
+  const status = normalizeRsvpStatus(fields.rsvp_status);
 
-  const normalizedStatus =
-    typeof fields.rsvp_status === "string" ? fields.rsvp_status.trim().toLowerCase() : null;
-
-  if (normalizedStatus !== "yes" && normalizedStatus !== "no") {
+  if (!status) {
     return {
       ok: false,
       status: 400,
-      error: "Missing or invalid rsvp_status. Expected 'yes' or 'no'.",
+      error: "Missing or invalid rsvp_status. Expected option text 'Yes'/'No' (stored as yes/no).",
       received_rsvp_status: fields.rsvp_status ?? null,
     };
   }
 
-  // Only update optional fields if they were present on the form submission.
-  // This allows different weddings to have different RSVP forms without wiping data.
   const updatePayload = {
-    rsvp_status: normalizedStatus,
+    rsvp_status: status,
     last_submission_id: rawSubmissionId,
     updated_at: new Date().toISOString(),
   };
@@ -219,10 +257,10 @@ async function updateHouseholdFromRsvp({ supabase, weddingId, rawSubmissionId, b
   }
 
   if (fields.events_attending !== null) {
+    // Store raw texts (e.g., "Wedding", "Reception") OR normalize to keys later
     updatePayload.events_attending = fields.events_attending;
   }
 
-  // Ensure the household belongs to this wedding (prevents cross-wedding updates)
   const { data: existing, error: fetchError } = await supabase
     .from("households")
     .select("id")
@@ -281,9 +319,7 @@ module.exports = async (req, res) => {
       .eq("public_code", publicCode)
       .maybeSingle();
 
-    if (lookupError) {
-      return res.status(500).json({ ok: false, error: lookupError.message });
-    }
+    if (lookupError) return res.status(500).json({ ok: false, error: lookupError.message });
 
     const weddingId = weddingRow?.wedding_id ?? null;
 
@@ -295,7 +331,6 @@ module.exports = async (req, res) => {
       });
     }
 
-    // Always write raw payload first (audit trail)
     const providerSubmissionId = extractProviderSubmissionId(body);
 
     let rawSubmissionId = null;
@@ -315,9 +350,7 @@ module.exports = async (req, res) => {
       const msg = String(insertError.message || "").toLowerCase();
       const isDuplicate = msg.includes("duplicate") || msg.includes("unique");
 
-      if (!isDuplicate) {
-        return res.status(500).json({ ok: false, error: insertError.message });
-      }
+      if (!isDuplicate) return res.status(500).json({ ok: false, error: insertError.message });
 
       if (providerSubmissionId) {
         const { data: existingRaw, error: fetchError } = await supabase
@@ -335,7 +368,6 @@ module.exports = async (req, res) => {
       rawSubmissionId = rawInsert?.id ?? null;
     }
 
-    // Route to processor (business tables)
     if (formType === "contact_sheet") {
       const result = await upsertHouseholdFromContactSheet({
         supabase,
@@ -344,9 +376,7 @@ module.exports = async (req, res) => {
         body,
       });
 
-      if (!result.ok) {
-        return res.status(result.status || 500).json({ ok: false, error: result.error });
-      }
+      if (!result.ok) return res.status(result.status || 500).json({ ok: false, error: result.error });
 
       return res.status(200).json({
         ok: true,
@@ -364,11 +394,7 @@ module.exports = async (req, res) => {
         body,
       });
 
-      if (!result.ok) {
-        return res
-          .status(result.status || 500)
-          .json({ ok: false, error: result.error, ...result });
-      }
+      if (!result.ok) return res.status(result.status || 500).json({ ok: false, ...result });
 
       return res.status(200).json({
         ok: true,
@@ -378,7 +404,6 @@ module.exports = async (req, res) => {
       });
     }
 
-    // Default: raw-only (no processor)
     return res.status(200).json({ ok: true, routed: "raw_only", form_type: formType ?? null });
   } catch (err) {
     return res.status(500).json({ ok: false, error: "Server error" });
