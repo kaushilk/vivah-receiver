@@ -1,14 +1,8 @@
 {
   "functions": {
-    "api/webhooks/tally.js": {
+    "api/tally.js": {
       "memory": 1024,
       "maxDuration": 10
     }
-  },
-  "rewrites": [
-    {
-      "source": "/dashboard.html",
-      "destination": "/public/dashboard.html"
-    }
-  ]
+  }
 }
