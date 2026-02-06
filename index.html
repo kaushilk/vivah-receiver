@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<!-- Version 2 - Fixed script tags -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vivah Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+  <!-- Header -->
+  <header class="bg-white shadow-sm border-b border-gray-200">
+    <div class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+      <div class="flex justify-between items-center">
+        <div>
+          <h1 class="text-3xl font-bold text-gray-900">Vivah Dashboard</h1>
+          <p class="mt-1 text-sm text-gray-500" id="wedding-subtitle">Loading...</p>
+        </div>
+        <button 
+          onclick="exportCSV()" 
+          class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition">
+          📥 Export CSV
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
+    
+    <!-- Summary Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+      <div class="bg-white rounded-lg shadow p-6">
+        <div class="text-sm font-medium text-gray-500">Total Households</div>
+        <div class="mt-2 text-3xl font-bold text-gray-900" id="total-count">-</div>
+      </div>
+      <div class="bg-white rounded-lg shadow p-6">
+        <div class="text-sm font-medium text-gray-500">✅ Yes</div>
+        <div class="mt-2 text-3xl font-bold text-green-600" id="yes-count">-</div>
+      </div>
+      <div class="bg-white rounded-lg shadow p-6">
+        <div class="text-sm font-medium text-gray-500">❌ No</div>
+        <div class="mt-2 text-3xl font-bold text-red-600" id="no-count">-</div>
+      </div>
+      <div class="bg-white rounded-lg shadow p-6">
+        <div class="text-sm font-medium text-gray-500">⏳ Pending</div>
+        <div class="mt-2 text-3xl font-bold text-yellow-600" id="pending-count">-</div>
+      </div>
+    </div>
+
+    <!-- Households Table -->
+    <div class="bg-white rounded-lg shadow overflow-hidden">
+      <div class="px-6 py-4 border-b border-gray-200">
+        <h2 class="text-xl font-semibold text-gray-900">👥 Guest List</h2>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200">
+          <thead class="bg-gray-50">
+            <tr>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Party Size</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">RSVP Status</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Events</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">RSVP Link</th>
+            </tr>
+          </thead>
+          <tbody id="households-table" class="bg-white divide-y divide-gray-200">
+            <tr>
+              <td colspan="6" class="px-6 py-12 text-center text-gray-500">
+                <div class="animate-pulse">Loading households...</div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Recent Submissions -->
+    <div class="mt-8 bg-white rounded-lg shadow overflow-hidden">
+      <div class="px-6 py-4 border-b border-gray-200">
+        <h2 class="text-xl font-semibold text-gray-900">📝 Recent Submissions (Last 10)</h2>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200">
+          <thead class="bg-gray-50">
+            <tr>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Provider ID</th>
+            </tr>
+          </thead>
+          <tbody id="submissions-table" class="bg-white divide-y divide-gray-200">
+            <tr>
+              <td colspan="3" class="px-6 py-12 text-center text-gray-500">
+                <div class="animate-pulse">Loading submissions...</div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    // Configuration
+    const SUPABASE_URL = 'https://krdscjxkrrzkwhpbhpyp.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtyZHNjanhrcnJ6a3docGJocHlwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3NDM5MzIsImV4cCI6MjA4MzMxOTkzMn0.Yx6JzoVtTbA8sv1bGwwWI4wQnTosjY6NXuhLraKsbUY';
+    const PUBLIC_CODE = 'TT01';
+    const TALLY_RSVP_FORM_URL = 'https://tally.so/r/A7pYWe';
+
+    // Initialize Supabase client
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    
+    let weddingData = null;
+    let householdsData = [];
+
+    // Initialize dashboard
+    async function init() {
+      try {
+        const { data: wedding, error: weddingError } = await supabase
+          .from('weddings')
+          .select('wedding_id, couple_1, couple_2, wedding_name')
+          .eq('public_code', PUBLIC_CODE)
+          .single();
+
+        if (weddingError) throw weddingError;
+        if (!wedding) throw new Error('Wedding not found for public_code: ' + PUBLIC_CODE);
+
+        weddingData = wedding;
+        document.getElementById('wedding-subtitle').textContent = 
+          `${wedding.couple_1} & ${wedding.couple_2} (${PUBLIC_CODE})`;
+
+        await loadHouseholds();
+        await loadSubmissions();
+
+      } catch (error) {
+        console.error('Error initializing dashboard:', error);
+        alert('Error loading dashboard: ' + error.message);
+      }
+    }
+
+    async function loadHouseholds() {
+      const { data, error } = await supabase
+        .from('households')
+        .select('*')
+        .eq('wedding_id', weddingData.wedding_id)
+        .order('primary_name', { ascending: true });
+
+      if (error) {
+        console.error('Error loading households:', error);
+        return;
+      }
+
+      householdsData = data || [];
+      renderHouseholds();
+      updateSummary();
+    }
+
+    function renderHouseholds() {
+      const tbody = document.getElementById('households-table');
+      
+      if (householdsData.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="6" class="px-6 py-12 text-center text-gray-500">
+              No households yet. Add some via your contact sheet form!
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      tbody.innerHTML = householdsData.map(h => {
+        const contact = h.phone_normalized || h.email_normalized || 'No contact';
+        const statusBadge = getStatusBadge(h.rsvp_status);
+        const eventsText = h.events_attending && h.events_attending.length > 0 
+          ? h.events_attending.join(', ') 
+          : '-';
+        const rsvpLink = generateRsvpLink(h.id);
+
+        return `
+          <tr class="hover:bg-gray-50">
+            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${h.primary_name}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${contact}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${h.party_size || '-'}</td>
+            <td class="px-6 py-4 whitespace-nowrap">${statusBadge}</td>
+            <td class="px-6 py-4 text-sm text-gray-500">${eventsText}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm">
+              <button 
+                onclick="copyToClipboard('${rsvpLink}')" 
+                class="text-blue-600 hover:text-blue-800 font-medium">
+                📋 Copy Link
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function updateSummary() {
+      const total = householdsData.length;
+      const yes = householdsData.filter(h => h.rsvp_status === 'yes').length;
+      const no = householdsData.filter(h => h.rsvp_status === 'no').length;
+      const pending = householdsData.filter(h => h.rsvp_status === 'pending').length;
+
+      document.getElementById('total-count').textContent = total;
+      document.getElementById('yes-count').textContent = yes;
+      document.getElementById('no-count').textContent = no;
+      document.getElementById('pending-count').textContent = pending;
+    }
+
+    function getStatusBadge(status) {
+      const badges = {
+        'yes': '<span class="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">✅ Yes</span>',
+        'no': '<span class="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">❌ No</span>',
+        'pending': '<span class="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">⏳ Pending</span>'
+      };
+      return badges[status] || badges['pending'];
+    }
+
+    function generateRsvpLink(houseId) {
+      const params = new URLSearchParams({
+        house_id: houseId,
+        w: PUBLIC_CODE
+      });
+      return `${TALLY_RSVP_FORM_URL}?${params.toString()}`;
+    }
+
+    function copyToClipboard(text) {
+      navigator.clipboard.writeText(text).then(() => {
+        alert('✅ RSVP link copied to clipboard!');
+      }).catch(err => {
+        console.error('Failed to copy:', err);
+        alert('❌ Failed to copy link. Please try again.');
+      });
+    }
+
+    async function loadSubmissions() {
+      const { data, error } = await supabase
+        .from('submissions_raw')
+        .select('received_at, provider, provider_submission_id, payload')
+        .eq('wedding_id', weddingData.wedding_id)
+        .order('received_at', { ascending: false })
+        .limit(10);
+
+      if (error) {
+        console.error('Error loading submissions:', error);
+        return;
+      }
+
+      renderSubmissions(data || []);
+    }
+
+    function renderSubmissions(submissions) {
+      const tbody = document.getElementById('submissions-table');
+      
+      if (submissions.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="3" class="px-6 py-12 text-center text-gray-500">
+              No submissions yet.
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      tbody.innerHTML = submissions.map(s => {
+        const timeAgo = getTimeAgo(new Date(s.received_at));
+        const formType = s.payload?.data?.fields?.find(f => f.label === 'form_type')?.value || 'unknown';
+        
+        return `
+          <tr class="hover:bg-gray-50">
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${timeAgo}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${formType}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">${s.provider_submission_id || '-'}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function getTimeAgo(date) {
+      const seconds = Math.floor((new Date() - date) / 1000);
+      
+      const intervals = {
+        year: 31536000,
+        month: 2592000,
+        week: 604800,
+        day: 86400,
+        hour: 3600,
+        minute: 60
+      };
+      
+      for (const [unit, secondsInUnit] of Object.entries(intervals)) {
+        const interval = Math.floor(seconds / secondsInUnit);
+        if (interval >= 1) {
+          return interval === 1 ? `1 ${unit} ago` : `${interval} ${unit}s ago`;
+        }
+      }
+      
+      return 'just now';
+    }
+
+    function exportCSV() {
+      if (householdsData.length === 0) {
+        alert('No data to export!');
+        return;
+      }
+
+      const headers = ['primary_name', 'phone', 'email', 'rsvp_status', 'party_size', 'events_attending', 'rsvp_link'];
+      const csvRows = [headers.join(',')];
+
+      householdsData.forEach(h => {
+        const row = [
+          `"${h.primary_name}"`,
+          h.phone_normalized || '',
+          h.email_normalized || '',
+          h.rsvp_status,
+          h.party_size || '',
+          `"${(h.events_attending || []).join(', ')}"`,
+          generateRsvpLink(h.id)
+        ];
+        csvRows.push(row.join(','));
+      });
+
+      const csvContent = csvRows.join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `vivah-guests-${PUBLIC_CODE}-${Date.now()}.csv`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    }
+
+    window.addEventListener('DOMContentLoaded', init);
+  </script>
+
+</body>
+</html>
