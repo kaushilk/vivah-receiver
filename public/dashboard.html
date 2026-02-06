@@ -10,12 +10,7 @@
 <body class="bg-gray-50 min-h-screen">
   
   <!-- Configuration Section -->
-  <script>
-    const SUPABASE_URL = 'https://krdscjxkrrzkwhpbhpyp.supabase.co';
-    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtyZHNjanhrcnJ6a3docGJocHlwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3NDM5MzIsImV4cCI6MjA4MzMxOTkzMn0.Yx6JzoVtTbA8sv1bGwwWI4wQnTosjY6NXuhLraKsbUY';
-    const PUBLIC_CODE = 'TT01';
-    const TALLY_RSVP_FORM_URL = 'https://tally.so/r/A7pYWe';
-  </script>
+
 
   <!-- Header -->
   <header class="bg-white shadow-sm border-b border-gray-200">
@@ -114,6 +109,12 @@
 
   <!-- JavaScript Logic -->
   <script>
+    // Configuration
+    const SUPABASE_URL = 'https://krdscjxkrrzkwhpbhpyp.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtyZHNjanhrcnJ6a3docGJocHlwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3NDM5MzIsImV4cCI6MjA4MzMxOTkzMn0.Yx6JzoVtTbA8sv1bGwwWI4wQnTosjY6NXuhLraKsbUY';
+    const PUBLIC_CODE = 'TT01';
+    const TALLY_RSVP_FORM_URL = 'https://tally.so/r/A7pYWe';
+
     // Initialize Supabase client
     const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     
