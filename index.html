@@ -222,8 +222,9 @@
 
       function generateRsvpLink(houseId) {
         const params = new URLSearchParams({
-          house_id: houseId,
-          w: config.publicCode
+          w: config.publicCode,
+          form_type: 'rsvp',
+          house_id: houseId
         });
         return `${config.tallyFormUrl}?${params.toString()}`;
       }
