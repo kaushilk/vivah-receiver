@@ -8,9 +8,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body class="bg-gray-50 min-h-screen">
-  
-  <!-- Configuration Section -->
-
 
   <!-- Header -->
   <header class="bg-white shadow-sm border-b border-gray-200">
@@ -107,7 +104,6 @@
 
   </main>
 
-  <!-- JavaScript Logic -->
   <script>
     // Configuration
     const SUPABASE_URL = 'https://krdscjxkrrzkwhpbhpyp.supabase.co';
@@ -124,7 +120,6 @@
     // Initialize dashboard
     async function init() {
       try {
-        // 1. Lookup wedding by public_code
         const { data: wedding, error: weddingError } = await supabase
           .from('weddings')
           .select('wedding_id, couple_1, couple_2, wedding_name')
@@ -138,10 +133,7 @@
         document.getElementById('wedding-subtitle').textContent = 
           `${wedding.couple_1} & ${wedding.couple_2} (${PUBLIC_CODE})`;
 
-        // 2. Load households
         await loadHouseholds();
-
-        // 3. Load recent submissions
         await loadSubmissions();
 
       } catch (error) {
@@ -150,7 +142,6 @@
       }
     }
 
-    // Load households
     async function loadHouseholds() {
       const { data, error } = await supabase
         .from('households')
@@ -168,7 +159,6 @@
       updateSummary();
     }
 
-    // Render households table
     function renderHouseholds() {
       const tbody = document.getElementById('households-table');
       
@@ -210,7 +200,6 @@
       }).join('');
     }
 
-    // Update summary counts
     function updateSummary() {
       const total = householdsData.length;
       const yes = householdsData.filter(h => h.rsvp_status === 'yes').length;
@@ -223,7 +212,6 @@
       document.getElementById('pending-count').textContent = pending;
     }
 
-    // Get status badge HTML
     function getStatusBadge(status) {
       const badges = {
         'yes': '<span class="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">✅ Yes</span>',
@@ -233,7 +221,6 @@
       return badges[status] || badges['pending'];
     }
 
-    // Generate RSVP link
     function generateRsvpLink(houseId) {
       const params = new URLSearchParams({
         house_id: houseId,
@@ -242,7 +229,6 @@
       return `${TALLY_RSVP_FORM_URL}?${params.toString()}`;
     }
 
-    // Copy to clipboard
     function copyToClipboard(text) {
       navigator.clipboard.writeText(text).then(() => {
         alert('✅ RSVP link copied to clipboard!');
@@ -252,7 +238,6 @@
       });
     }
 
-    // Load recent submissions
     async function loadSubmissions() {
       const { data, error } = await supabase
         .from('submissions_raw')
@@ -269,7 +254,6 @@
       renderSubmissions(data || []);
     }
 
-    // Render submissions table
     function renderSubmissions(submissions) {
       const tbody = document.getElementById('submissions-table');
       
@@ -298,7 +282,6 @@
       }).join('');
     }
 
-    // Get relative time (e.g., "2 hours ago")
     function getTimeAgo(date) {
       const seconds = Math.floor((new Date() - date) / 1000);
       
@@ -321,7 +304,6 @@
       return 'just now';
     }
 
-    // Export to CSV
     function exportCSV() {
       if (householdsData.length === 0) {
         alert('No data to export!');
@@ -354,7 +336,6 @@
       window.URL.revokeObjectURL(url);
     }
 
-    // Initialize on page load
     window.addEventListener('DOMContentLoaded', init);
   </script>
 
