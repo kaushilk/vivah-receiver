@@ -214,7 +214,7 @@ async function upsertHouseholdFromContactSheet({ supabase, weddingId, rawSubmiss
   return { ok: true, household_id: data.id, action: "inserted" };
 }
 
-async function updateHouseholdFromRsvp({ supabase, weddingId, rawSubmissionId, body }) {
+async function updateGuestsFromRsvp({ supabase, weddingId, rawSubmissionId, body }) {
   const houseId = extractHouseId(body);
 
   if (!isUuid(houseId)) {
@@ -238,15 +238,11 @@ async function updateHouseholdFromRsvp({ supabase, weddingId, rawSubmissionId, b
     };
   }
 
+  // Build update payload for guests
   const updatePayload = {
     rsvp_status: status,
-    last_submission_id: rawSubmissionId,
     updated_at: new Date().toISOString(),
   };
-
-  if (fields.party_size !== null && !Number.isNaN(fields.party_size)) {
-    updatePayload.party_size = fields.party_size;
-  }
 
   if (fields.dietary_notes !== null) {
     updatePayload.dietary_notes = fields.dietary_notes;
@@ -257,11 +253,11 @@ async function updateHouseholdFromRsvp({ supabase, weddingId, rawSubmissionId, b
   }
 
   if (fields.events_attending !== null) {
-    // Store raw texts (e.g., "Wedding", "Reception") OR normalize to keys later
     updatePayload.events_attending = fields.events_attending;
   }
 
-  const { data: existing, error: fetchError } = await supabase
+  // Verify household exists for this wedding
+  const { data: household, error: fetchError } = await supabase
     .from("households")
     .select("id")
     .eq("id", houseId)
@@ -269,7 +265,7 @@ async function updateHouseholdFromRsvp({ supabase, weddingId, rawSubmissionId, b
     .maybeSingle();
 
   if (fetchError) return { ok: false, status: 500, error: fetchError.message };
-  if (!existing?.id) {
+  if (!household?.id) {
     return {
       ok: false,
       status: 404,
@@ -278,14 +274,16 @@ async function updateHouseholdFromRsvp({ supabase, weddingId, rawSubmissionId, b
     };
   }
 
-  const { error: updateError } = await supabase
-    .from("households")
+  // Update ALL guests in the household with the RSVP data
+  const { error: updateError, count } = await supabase
+    .from("guests")
     .update(updatePayload)
-    .eq("id", houseId);
+    .eq("household_id", houseId)
+    .eq("wedding_id", weddingId);
 
   if (updateError) return { ok: false, status: 500, error: updateError.message };
 
-  return { ok: true, household_id: houseId, action: "updated_rsvp" };
+  return { ok: true, household_id: houseId, guests_updated: count || 0, action: "updated_rsvp" };
 }
 
 /* =========================
@@ -387,7 +385,7 @@ module.exports = async (req, res) => {
     }
 
     if (formType === "rsvp") {
-      const result = await updateHouseholdFromRsvp({
+      const result = await updateGuestsFromRsvp({
         supabase,
         weddingId,
         rawSubmissionId,
@@ -400,12 +398,14 @@ module.exports = async (req, res) => {
         ok: true,
         routed: "rsvp",
         household_id: result.household_id,
+        guests_updated: result.guests_updated,
         action: result.action,
       });
     }
 
     return res.status(200).json({ ok: true, routed: "raw_only", form_type: formType ?? null });
   } catch (err) {
+    console.error("Webhook error:", err);
     return res.status(500).json({ ok: false, error: "Server error" });
   }
 };
