@@ -393,7 +393,7 @@
           .order('primary_name', { ascending: true });
 
         if (householdsError) {
-          console.error('Error loading households:', error);
+          console.error('Error loading households:', householdsError);
           return;
         }
 
