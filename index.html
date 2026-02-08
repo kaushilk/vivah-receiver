@@ -36,7 +36,7 @@
     
     <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
       <div class="bg-white rounded-lg shadow p-6">
-        <div class="text-sm font-medium text-gray-500">Total Households</div>
+        <div class="text-sm font-medium text-gray-500">Total Guests</div>
         <div class="mt-2 text-3xl font-bold text-gray-900" id="total-count">-</div>
       </div>
       <div class="bg-white rounded-lg shadow p-6">
@@ -436,8 +436,23 @@
           const guestCount = h.guests?.length || 0;
           const guestsText = `${guestCount} guest${guestCount !== 1 ? 's' : ''}`;
           
-          // Calculate RSVP status (placeholder for now)
-          const statusText = 'Pending';
+          // Calculate RSVP status from guests
+          let statusText = 'No Guests';
+          if (h.guests && h.guests.length > 0) {
+            const yesCount = h.guests.filter(g => g.rsvp_status === 'yes').length;
+            const noCount = h.guests.filter(g => g.rsvp_status === 'no').length;
+            const pendingCount = h.guests.filter(g => !g.rsvp_status || g.rsvp_status === 'pending').length;
+            
+            if (yesCount === h.guests.length) {
+              statusText = `<span class="text-green-600 font-semibold">✅ All Yes</span>`;
+            } else if (noCount === h.guests.length) {
+              statusText = `<span class="text-red-600 font-semibold">❌ All No</span>`;
+            } else if (pendingCount === h.guests.length) {
+              statusText = `<span class="text-yellow-600 font-semibold">⏳ Pending</span>`;
+            } else {
+              statusText = `<span class="text-blue-600">${yesCount} Yes / ${noCount} No / ${pendingCount} Pending</span>`;
+            }
+          }
           
           const contactLink = `https://vivah-receiver.vercel.app/contact?household_id=${h.id}&w=${config.publicCode}`;
           const rsvpLink = generateRsvpLink(h.id);
@@ -446,7 +461,7 @@
             <tr class="hover:bg-gray-50">
               <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${h.primary_name}</td>
               <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${guestsText}</td>
-              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${statusText}</td>
+              <td class="px-6 py-4 whitespace-nowrap text-sm">${statusText}</td>
               <td class="px-6 py-4 whitespace-nowrap text-sm">
                 <button 
                   onclick="window.copyToClipboard('${contactLink}')" 
@@ -467,13 +482,32 @@
       }
 
       function updateSummary() {
-        // For now, just show household counts
-        // Later we'll update to show guest-level RSVP counts
-        const total = householdsData.length;
-        document.getElementById('total-count').textContent = total;
-        document.getElementById('yes-count').textContent = 0;
-        document.getElementById('no-count').textContent = 0;
-        document.getElementById('pending-count').textContent = total;
+        // Count guests by RSVP status
+        let totalGuests = 0;
+        let yesCount = 0;
+        let noCount = 0;
+        let pendingCount = 0;
+
+        householdsData.forEach(household => {
+          if (household.guests && Array.isArray(household.guests)) {
+            household.guests.forEach(guest => {
+              totalGuests++;
+              const status = guest.rsvp_status?.toLowerCase();
+              if (status === 'yes') {
+                yesCount++;
+              } else if (status === 'no') {
+                noCount++;
+              } else {
+                pendingCount++;
+              }
+            });
+          }
+        });
+
+        document.getElementById('total-count').textContent = totalGuests;
+        document.getElementById('yes-count').textContent = yesCount;
+        document.getElementById('no-count').textContent = noCount;
+        document.getElementById('pending-count').textContent = pendingCount;
       }
 
       function generateRsvpLink(householdId) {
@@ -557,7 +591,7 @@
           return;
         }
 
-        const headers = ['household_name', 'guest_name', 'is_primary', 'relationship', 'age', 'rsvp_status'];
+        const headers = ['household_name', 'guest_name', 'is_primary', 'relationship', 'age', 'rsvp_status', 'events_attending', 'dietary_notes'];
         const csvRows = [headers.join(',')];
 
         householdsData.forEach(h => {
@@ -569,7 +603,9 @@
                 g.is_primary_contact ? 'Yes' : 'No',
                 `"${g.relationship_to_primary || ''}"`,
                 g.age || '',
-                g.rsvp_status || 'pending'
+                g.rsvp_status || 'pending',
+                `"${(g.events_attending || []).join(', ')}"`,
+                `"${g.dietary_notes || ''}"`
               ];
               csvRows.push(row.join(','));
             });
