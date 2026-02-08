@@ -386,8 +386,24 @@
         const { data: households, error: householdsError } = await db
           .from('households')
           .select(`
-            *,
-            guests(*)
+            id,
+            wedding_id,
+            primary_name,
+            primary_guest_id,
+            created_at,
+            updated_at,
+            guests!household_id(
+              id,
+              full_name,
+              relationship_to_primary,
+              is_primary_contact,
+              phone_normalized,
+              email_normalized,
+              age,
+              rsvp_status,
+              events_attending,
+              dietary_notes
+            )
           `)
           .eq('wedding_id', weddingData.wedding_id)
           .order('primary_name', { ascending: true });
