@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Loading Contact Form - Vivah</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+    .loader {
+      text-align: center;
+      max-width: 400px;
+      padding: 40px;
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(10px);
+      border-radius: 20px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    }
+    .logo {
+      font-size: 48px;
+      font-weight: bold;
+      margin-bottom: 20px;
+      background: linear-gradient(135deg, #fff 0%, #f0f0f0 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .spinner {
+      border: 4px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      border-top: 4px solid white;
+      width: 50px;
+      height: 50px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 20px;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .message {
+      font-size: 18px;
+      margin-top: 20px;
+      line-height: 1.6;
+    }
+    .small-text {
+      font-size: 14px;
+      margin-top: 10px;
+      opacity: 0.8;
+    }
+  </style>
+</head>
+<body>
+  <div class="loader">
+    <div class="logo">🎉 Vivah</div>
+    <div class="spinner"></div>
+    <p class="message" id="status-message">Preparing your contact form...</p>
+    <p class="small-text">This will only take a moment</p>
+  </div>
+
+  <script type="module">
+    (async function() {
+      'use strict';
+      
+      // Configuration
+      const config = {
+        supabaseUrl: 'https://krdscjxkrrzkwhpbhpyp.supabase.co',
+        supabaseKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtyZHNjanhrcnJ6a3docGJocHlwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3NDM5MzIsImV4cCI6MjA4MzMxOTkzMn0.Yx6JzoVtTbA8sv1bGwwWI4wQnTosjY6NXuhLraKsbUY',
+        tallyContactFormUrl: 'https://tally.so/r/zxMDYM',
+        redirectTimeout: 2000 // Max wait time in ms
+      };
+
+      const db = window.supabase.createClient(config.supabaseUrl, config.supabaseKey);
+
+      function updateStatus(message) {
+        const statusEl = document.getElementById('status-message');
+        if (statusEl) statusEl.textContent = message;
+      }
+
+      function buildTallyUrl(includeHouseholdId) {
+        const urlParams = new URLSearchParams(window.location.search);
+        const householdId = urlParams.get('household_id');
+        const weddingCode = urlParams.get('w');
+
+        const params = new URLSearchParams({
+          w: weddingCode || 'TT01',
+          form_type: 'contact_sheet'
+        });
+
+        if (includeHouseholdId && householdId) {
+          params.append('household_id', householdId);
+        }
+
+        return `${config.tallyContactFormUrl}?${params.toString()}`;
+      }
+
+      function redirectToForm(url) {
+        updateStatus('Redirecting to form...');
+        window.location.href = url;
+      }
+
+      async function routeUser() {
+        try {
+          // Get URL parameters
+          const urlParams = new URLSearchParams(window.location.search);
+          const householdId = urlParams.get('household_id');
+          const weddingCode = urlParams.get('w');
+
+          // Validate required parameters
+          if (!weddingCode) {
+            console.warn('Missing wedding code, using default');
+          }
+
+          // If no household_id, go straight to global form
+          if (!householdId) {
+            console.log('No household_id provided, routing to global form');
+            redirectToForm(buildTallyUrl(false));
+            return;
+          }
+
+          // Set timeout fallback (safety net)
+          const timeoutId = setTimeout(() => {
+            console.warn('Database query timeout, routing to global form as fallback');
+            redirectToForm(buildTallyUrl(false));
+          }, config.redirectTimeout);
+
+          updateStatus('Checking your information...');
+
+          // Query database to check if household has contact info
+          const { data: guests, error } = await db
+            .from('guests')
+            .select('phone_normalized, email_normalized')
+            .eq('household_id', householdId);
+
+          // Clear timeout
+          clearTimeout(timeoutId);
+
+          // Handle errors
+          if (error) {
+            console.error('Database error:', error);
+            console.log('Error occurred, routing to global form as fallback');
+            redirectToForm(buildTallyUrl(false));
+            return;
+          }
+
+          // Check if any guest has contact info (phone OR email)
+          const hasContactInfo = guests && guests.length > 0 && 
+            guests.some(g => g.phone_normalized || g.email_normalized);
+
+          if (hasContactInfo) {
+            // Already has contact info → route to global form (prevents overwrite)
+            console.log('Household already has contact info, routing to global form');
+            updateStatus('Redirecting to form...');
+            redirectToForm(buildTallyUrl(false));
+          } else {
+            // No contact info yet → route to personalized form
+            console.log('No contact info found, routing to personalized form');
+            updateStatus('Loading your personalized form...');
+            redirectToForm(buildTallyUrl(true));
+          }
+
+        } catch (error) {
+          console.error('Unexpected error:', error);
+          console.log('Unexpected error, routing to global form as fallback');
+          redirectToForm(buildTallyUrl(false));
+        }
+      }
+
+      // Run on page load
+      routeUser();
+    })();
+  </script>
+</body>
+</html>
