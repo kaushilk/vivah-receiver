@@ -143,26 +143,145 @@ function normalizeRsvpStatus(s) {
 }
 
 /* =========================
-   PROCESSORS
+   PROCESSORS - GUEST-CENTRIC
    ========================= */
 
-async function upsertHouseholdFromContactSheet({ supabase, weddingId, rawSubmissionId, body }) {
+async function upsertGuestFromContactSheet({ supabase, weddingId, rawSubmissionId, body }) {
+  const houseId = extractHouseId(body);
   const extracted = extractContactSheetFields(body);
 
   const phoneNormalized = normalizePhone(extracted.phone_raw);
   const emailNormalized = normalizeEmail(extracted.email_raw);
 
+  // CASE 1: Personalized link (house_id provided)
+  if (isUuid(houseId)) {
+    // Verify household exists
+    const { data: household, error: householdError } = await supabase
+      .from("households")
+      .select("id")
+      .eq("id", houseId)
+      .eq("wedding_id", weddingId)
+      .maybeSingle();
+
+    if (householdError) return { ok: false, status: 500, error: householdError.message };
+    if (!household) {
+      return {
+        ok: false,
+        status: 404,
+        error: "Household not found for this wedding (invalid house_id).",
+        received_house_id: houseId,
+      };
+    }
+
+    // Find primary guest for this household
+    const { data: primaryGuest, error: guestError } = await supabase
+      .from("guests")
+      .select("id")
+      .eq("household_id", houseId)
+      .eq("is_primary_contact", true)
+      .maybeSingle();
+
+    if (guestError) return { ok: false, status: 500, error: guestError.message };
+
+    const guestPayload = {
+      phone_raw: extracted.phone_raw,
+      phone_normalized: phoneNormalized,
+      email_raw: extracted.email_raw,
+      email_normalized: emailNormalized,
+      address_line_1: extracted.address_line_1,
+      address_line_2: extracted.address_line_2,
+      city: extracted.city,
+      state: extracted.state,
+      postal_code: extracted.postal_code,
+      country: extracted.country,
+      updated_at: new Date().toISOString(),
+    };
+
+    // If primary guest exists, update; otherwise create
+    if (primaryGuest?.id) {
+      const { error: updateError } = await supabase
+        .from("guests")
+        .update(guestPayload)
+        .eq("id", primaryGuest.id);
+
+      if (updateError) return { ok: false, status: 500, error: updateError.message };
+
+      return {
+        ok: true,
+        household_id: houseId,
+        guest_id: primaryGuest.id,
+        action: "updated_primary_guest",
+      };
+    } else {
+      // No primary guest exists, create one
+      const { data: newGuest, error: insertError } = await supabase
+        .from("guests")
+        .insert({
+          wedding_id: weddingId,
+          household_id: houseId,
+          full_name: extracted.primary_name || "Unknown Guest",
+          is_primary_contact: true,
+          ...guestPayload,
+        })
+        .select("id")
+        .single();
+
+      if (insertError) return { ok: false, status: 500, error: insertError.message };
+
+      // Update household to reference this as primary guest
+      await supabase
+        .from("households")
+        .update({ primary_guest_id: newGuest.id })
+        .eq("id", houseId);
+
+      return {
+        ok: true,
+        household_id: houseId,
+        guest_id: newGuest.id,
+        action: "created_primary_guest",
+      };
+    }
+  }
+
+  // CASE 2: Global link (no house_id) - dedupe by phone/email
   if (!phoneNormalized && !emailNormalized) {
     return {
       ok: false,
       status: 400,
-      error: "Missing phone_number and email. Provide at least one so we can dedupe/update the household.",
+      error: "Missing phone_number and email. Provide at least one.",
     };
   }
 
-  const payload = {
-    wedding_id: weddingId,
-    primary_name: extracted.primary_name || "Unknown",
+  // Check for existing guest by phone or email
+  let existingGuest = null;
+
+  if (phoneNormalized) {
+    const { data, error } = await supabase
+      .from("guests")
+      .select("id, household_id")
+      .eq("wedding_id", weddingId)
+      .eq("phone_normalized", phoneNormalized)
+      .eq("is_primary_contact", true)
+      .maybeSingle();
+
+    if (error) return { ok: false, status: 500, error: error.message };
+    existingGuest = data || null;
+  }
+
+  if (!existingGuest && emailNormalized) {
+    const { data, error } = await supabase
+      .from("guests")
+      .select("id, household_id")
+      .eq("wedding_id", weddingId)
+      .eq("email_normalized", emailNormalized)
+      .eq("is_primary_contact", true)
+      .maybeSingle();
+
+    if (error) return { ok: false, status: 500, error: error.message };
+    existingGuest = data || null;
+  }
+
+  const guestPayload = {
     phone_raw: extracted.phone_raw,
     phone_normalized: phoneNormalized,
     email_raw: extracted.email_raw,
@@ -173,45 +292,64 @@ async function upsertHouseholdFromContactSheet({ supabase, weddingId, rawSubmiss
     state: extracted.state,
     postal_code: extracted.postal_code,
     country: extracted.country,
-    last_submission_id: rawSubmissionId,
     updated_at: new Date().toISOString(),
   };
 
-  let existing = null;
+  // Update existing guest
+  if (existingGuest?.id) {
+    const { error: updateError } = await supabase
+      .from("guests")
+      .update(guestPayload)
+      .eq("id", existingGuest.id);
 
-  if (phoneNormalized) {
-    const { data, error } = await supabase
-      .from("households")
-      .select("id")
-      .eq("wedding_id", weddingId)
-      .eq("phone_normalized", phoneNormalized)
-      .maybeSingle();
+    if (updateError) return { ok: false, status: 500, error: updateError.message };
 
-    if (error) return { ok: false, status: 500, error: error.message };
-    existing = data || null;
+    return {
+      ok: true,
+      household_id: existingGuest.household_id,
+      guest_id: existingGuest.id,
+      action: "updated_existing_guest",
+    };
   }
 
-  if (!existing && emailNormalized) {
-    const { data, error } = await supabase
-      .from("households")
-      .select("id")
-      .eq("wedding_id", weddingId)
-      .eq("email_normalized", emailNormalized)
-      .maybeSingle();
+  // Create new household + primary guest
+  const { data: newHousehold, error: householdError } = await supabase
+    .from("households")
+    .insert({
+      wedding_id: weddingId,
+      primary_name: extracted.primary_name || "Unknown Household",
+    })
+    .select("id")
+    .single();
 
-    if (error) return { ok: false, status: 500, error: error.message };
-    existing = data || null;
-  }
+  if (householdError) return { ok: false, status: 500, error: householdError.message };
 
-  if (existing?.id) {
-    const { error } = await supabase.from("households").update(payload).eq("id", existing.id);
-    if (error) return { ok: false, status: 500, error: error.message };
-    return { ok: true, household_id: existing.id, action: "updated" };
-  }
+  const { data: newGuest, error: guestError } = await supabase
+    .from("guests")
+    .insert({
+      wedding_id: weddingId,
+      household_id: newHousehold.id,
+      full_name: extracted.primary_name || "Unknown Guest",
+      is_primary_contact: true,
+      ...guestPayload,
+    })
+    .select("id")
+    .single();
 
-  const { data, error } = await supabase.from("households").insert(payload).select("id").single();
-  if (error) return { ok: false, status: 500, error: error.message };
-  return { ok: true, household_id: data.id, action: "inserted" };
+  if (guestError) return { ok: false, status: 500, error: guestError.message };
+
+  // Link household to primary guest
+  await supabase
+    .from("households")
+    .update({ primary_guest_id: newGuest.id })
+    .eq("id", newHousehold.id);
+
+  return {
+    ok: true,
+    household_id: newHousehold.id,
+    guest_id: newGuest.id,
+    action: "created_new_household_and_guest",
+  };
 }
 
 async function updateGuestsFromRsvp({ supabase, weddingId, rawSubmissionId, body }) {
@@ -367,7 +505,7 @@ module.exports = async (req, res) => {
     }
 
     if (formType === "contact_sheet") {
-      const result = await upsertHouseholdFromContactSheet({
+      const result = await upsertGuestFromContactSheet({
         supabase,
         weddingId,
         rawSubmissionId,
@@ -380,6 +518,7 @@ module.exports = async (req, res) => {
         ok: true,
         routed: "contact_sheet",
         household_id: result.household_id,
+        guest_id: result.guest_id,
         action: result.action,
       });
     }
